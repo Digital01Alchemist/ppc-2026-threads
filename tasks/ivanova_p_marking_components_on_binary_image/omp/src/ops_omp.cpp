@@ -3,7 +3,10 @@
 #include <omp.h>
 
 #include <algorithm>
+#include <atomic>
 #include <numeric>
+#include <ranges>
+#include <string>
 #include <vector>
 
 #include "ivanova_p_marking_components_on_binary_image/common/include/common.hpp"
@@ -68,7 +71,7 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
 
   // Инициализация DSU
   parent_.resize(total_pixels + 1);
-  std::iota(parent_.begin(), parent_.end(), 0);
+  std::ranges::iota(parent_, 0);
 
   return true;
 }
@@ -99,71 +102,106 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::UnionLabels(int i, int j) {
   }
 }
 
-bool IvanovaPMarkingComponentsOnBinaryImageOMP::RunImpl() {
-  const int n_threads = ppc::util::GetNumThreads();
-  const int total_pixels = width_ * height_;
-
-// 1. Начальная разметка (параллельно)
+void IvanovaPMarkingComponentsOnBinaryImageOMP::InitLabelsOmp(int total_pixels, int n_threads) {
 #pragma omp parallel for default(none) shared(total_pixels) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (input_image_.data[i] != 0) {
       labels_[i] = i + 1;
     }
   }
+}
 
-// 2. Слияние соседей (параллельно)
+void IvanovaPMarkingComponentsOnBinaryImageOMP::MergeHorizontalPairsOmp(int n_threads) {
 #pragma omp parallel for default(none) shared(n_threads) num_threads(n_threads)
-  for (int y = 0; y < height_; ++y) {
-    for (int x = 0; x < width_; ++x) {
-      int idx = y * width_ + x;
-      if (labels_[idx] == 0) {
+  for (int yy = 0; yy < height_; ++yy) {
+    for (int xx = 0; xx < width_ - 1; ++xx) {
+      const int idx = (yy * width_) + xx;
+      const int cur_label = labels_[idx];
+      if (cur_label == 0) {
         continue;
       }
 
-      if (x + 1 < width_ && labels_[idx + 1] != 0) {
-        UnionLabels(labels_[idx], labels_[idx + 1]);
-      }
-      if (y + 1 < height_ && labels_[idx + width_] != 0) {
-        UnionLabels(labels_[idx], labels_[idx + width_]);
+      const int right_label = labels_[idx + 1];
+      if (right_label != 0) {
+        UnionLabels(cur_label, right_label);
       }
     }
   }
+}
 
-// 3. Финализация корней
+void IvanovaPMarkingComponentsOnBinaryImageOMP::MergeVerticalPairsOmp(int n_threads) {
+#pragma omp parallel for default(none) shared(n_threads) num_threads(n_threads)
+  for (int yy = 0; yy < height_ - 1; ++yy) {
+    for (int xx = 0; xx < width_; ++xx) {
+      const int idx = (yy * width_) + xx;
+      const int cur_label = labels_[idx];
+      if (cur_label == 0) {
+        continue;
+      }
+
+      const int bottom_label = labels_[idx + width_];
+      if (bottom_label != 0) {
+        UnionLabels(cur_label, bottom_label);
+      }
+    }
+  }
+}
+
+void IvanovaPMarkingComponentsOnBinaryImageOMP::FinalizeRootsOmp(int total_pixels, int n_threads) {
 #pragma omp parallel for default(none) shared(total_pixels) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
       labels_[i] = FindRoot(labels_[i]);
     }
   }
+}
 
-  // 4. Нормализация меток (нужно для прохождения CheckTestOutputData)
+void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pixels, int n_threads) {
   std::vector<int> roots;
+  roots.reserve(static_cast<size_t>(total_pixels));
+
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
       roots.push_back(labels_[i]);
     }
   }
-  std::sort(roots.begin(), roots.end());
-  roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
+
+  std::ranges::sort(roots);
+  // MSVC для std::ranges::unique возвращает subrange.
+  // После упрощения нам нужен итератор на "новый конец" уникальных элементов.
+  auto unique_res = std::ranges::unique(roots);
+  roots.erase(unique_res.begin(), roots.end());
 
   current_label_ = static_cast<int>(roots.size());
 
 #pragma omp parallel for default(none) shared(total_pixels, roots) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      auto it = std::lower_bound(roots.begin(), roots.end(), labels_[i]);
-      labels_[i] = static_cast<int>(std::distance(roots.begin(), it)) + 1;
+      const auto it = std::ranges::lower_bound(roots, labels_[i]);
+      labels_[i] = static_cast<int>(it - roots.begin()) + 1;
     }
   }
+}
 
-  // Вставка «важной строки» из твоего шаблона для корректной работы с фреймворком
+void IvanovaPMarkingComponentsOnBinaryImageOMP::TouchFrameworkOmp() {
   std::atomic<int> counter(0);
 #pragma omp parallel default(none) shared(counter) num_threads(ppc::util::GetNumThreads())
   {
     counter++;
   }
+}
 
+bool IvanovaPMarkingComponentsOnBinaryImageOMP::RunImpl() {
+  const int n_threads = ppc::util::GetNumThreads();
+  (void)n_threads;  // clang-analyzer: pragmas не учитываются как read-подобная операция
+  const int total_pixels = width_ * height_;
+
+  InitLabelsOmp(total_pixels, n_threads);
+  MergeHorizontalPairsOmp(n_threads);
+  MergeVerticalPairsOmp(n_threads);
+  FinalizeRootsOmp(total_pixels, n_threads);
+  NormalizeLabelsOmp(total_pixels, n_threads);
+  TouchFrameworkOmp();
   return true;
 }
 

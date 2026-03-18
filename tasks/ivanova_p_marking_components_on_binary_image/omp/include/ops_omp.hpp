@@ -30,6 +30,14 @@ class IvanovaPMarkingComponentsOnBinaryImageOMP : public BaseTask {
   // Методы для DSU (на векторе)
   int FindRoot(int i);
   void UnionLabels(int i, int j);
+
+  // OMP-хелперы для снижения cognitive complexity
+  void InitLabelsOmp(int total_pixels, int n_threads);
+  void MergeHorizontalPairsOmp(int n_threads);
+  void MergeVerticalPairsOmp(int n_threads);
+  void FinalizeRootsOmp(int total_pixels, int n_threads);
+  void NormalizeLabelsOmp(int total_pixels, int n_threads);
+  void TouchFrameworkOmp();
 };
 
 }  // namespace ivanova_p_marking_components_on_binary_image
