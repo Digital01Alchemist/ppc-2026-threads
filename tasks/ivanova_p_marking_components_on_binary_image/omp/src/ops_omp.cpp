@@ -180,7 +180,8 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
       // Используем ranges версию. Если GCC в CI упадет с ошибкой захвата CPO,
-      // то здесь придется либо добавить NOLINT, либо перечислить std::ranges::lower_bound в shared.
+      // то здесь придется либо добавить то что нельзя использовать и называть
+      // либо перечислить std::ranges::lower_bound в shared.
       // Но std::ranges::lower_bound — это CPO-объект; с OpenMP default(none) на GCC
       // это может приводить к ошибкам "not specified in enclosing parallel".
       const auto it = std::ranges::lower_bound(roots, labels_[i]);
