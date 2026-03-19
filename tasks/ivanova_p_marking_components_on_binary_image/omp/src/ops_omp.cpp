@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <numeric>
 #include <ranges>
 #include <string>
@@ -71,7 +73,10 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
 
   // Инициализация DSU
   parent_.resize(total_pixels + 1);
-  std::ranges::iota(parent_, 0);
+  // std::ranges::iota недоступен на части libc++ в CI, поэтому инициализируем вручную.
+  for (int i = 0; i <= total_pixels; ++i) {
+    parent_[i] = i;
+  }
 
   return true;
 }
@@ -158,7 +163,7 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::FinalizeRootsOmp(int total_pixel
 
 void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pixels, int n_threads) {
   std::vector<int> roots;
-  roots.reserve(static_cast<size_t>(total_pixels));
+  roots.reserve(static_cast<std::size_t>(total_pixels));
 
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
@@ -177,7 +182,9 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
 #pragma omp parallel for default(none) shared(total_pixels, roots) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      const auto it = std::ranges::lower_bound(roots, labels_[i]);
+      // std::ranges::lower_bound — это CPO-объект; с OpenMP default(none) на GCC
+      // это может приводить к ошибкам "not specified in enclosing parallel".
+      const auto it = std::lower_bound(roots.begin(), roots.end(), labels_[i]);
       labels_[i] = static_cast<int>(it - roots.begin()) + 1;
     }
   }

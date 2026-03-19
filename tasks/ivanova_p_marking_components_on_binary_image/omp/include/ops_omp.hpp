@@ -37,7 +37,7 @@ class IvanovaPMarkingComponentsOnBinaryImageOMP : public BaseTask {
   void MergeVerticalPairsOmp(int n_threads);
   void FinalizeRootsOmp(int total_pixels, int n_threads);
   void NormalizeLabelsOmp(int total_pixels, int n_threads);
-  void TouchFrameworkOmp();
+  static void TouchFrameworkOmp();
 };
 
 }  // namespace ivanova_p_marking_components_on_binary_image
