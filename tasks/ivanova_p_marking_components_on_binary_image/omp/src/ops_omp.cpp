@@ -176,16 +176,18 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
 
   current_label_ = static_cast<int>(roots.size());
 
-#pragma omp parallel for default(none) shared(total_pixels, roots) num_threads(n_threads)
+  // Создаем локальный псевдоним для CPO-объекта
+  const auto &ranges_lb = std::ranges::lower_bound;
+
+#pragma omp parallel for default(none) shared(total_pixels, roots, ranges_lb) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      // Используем ranges версию. Если GCC в CI упадет с ошибкой захвата CPO,
-      // то здесь придется либо добавить то что нельзя использовать и называть
-      // либо перечислить std::ranges::lower_bound в shared.
-      // Но std::ranges::lower_bound — это CPO-объект; с OpenMP default(none) на GCC
-      // это может приводить к ошибкам "not specified in enclosing parallel".
-      const auto it = std::ranges::lower_bound(roots, labels_[i]);
-      labels_[i] = static_cast<int>(std::ranges::distance(roots.begin(), it)) + 1;
+      // Вызываем через ссылку, которую мы честно пробросили в shared
+      const auto it = ranges_lb(roots, labels_[i]);
+
+      // Чтобы не использовать std::ranges::distance (который тоже CPO и требует захвата),
+      // просто вычитаем итераторы. Для вектора это эффективно и легально.
+      labels_[i] = static_cast<int>(it - roots.begin()) + 1;
     }
   }
 }
