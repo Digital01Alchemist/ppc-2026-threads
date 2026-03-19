@@ -88,13 +88,17 @@ int IvanovaPMarkingComponentsOnBinaryImageOMP::FindRoot(int i) {
 }
 
 void IvanovaPMarkingComponentsOnBinaryImageOMP::UnionLabels(int i, int j) {
-// Важно: FindRoot() читает parent_, а parent_ модифицируется в критической секции.
-// Поэтому и чтение, и запись должны быть синхронизированы, иначе возможен data race
-// и неверные объединения компонент.
+  int r_i = FindRoot(i);
+  int r_j = FindRoot(j);
+  if (r_i == r_j) {
+    return;  // Быстрый выход без блокировки
+  }
+
 #pragma omp critical(dsu_union)
   {
-    int r_i = FindRoot(i);
-    int r_j = FindRoot(j);
+    // Повторная проверка внутри блокировки (на случай, если за это время корень изменился)
+    r_i = FindRoot(i);
+    r_j = FindRoot(j);
     if (r_i != r_j) {
       if (r_i < r_j) {
         parent_[r_j] = r_i;
@@ -160,34 +164,32 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::FinalizeRootsOmp(int total_pixel
 }
 
 void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pixels, int n_threads) {
-  std::vector<int> roots;
-  roots.reserve(static_cast<std::size_t>(total_pixels));
+  // 1. Создаем временный массив для пометки используемых корней
+  // Используем uint8_t (bool), чтобы сэкономить память
+  std::vector<uint8_t> is_root_used(total_pixels + 1, 0);
 
+#pragma omp parallel for default(none) shared(total_pixels, is_root_used) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      roots.push_back(labels_[i]);
+      is_root_used[labels_[i]] = 1;  // Помечаем, что этот корень реально существует
     }
   }
-  std::ranges::sort(roots);
-  // MSVC для std::ranges::unique возвращает subrange.
-  // После упрощения нам нужен итератор на "новый конец" уникальных элементов.
-  auto unique_res = std::ranges::unique(roots);
-  roots.erase(unique_res.begin(), roots.end());
 
-  current_label_ = static_cast<int>(roots.size());
+  // 2. Последовательно собираем только УНИКАЛЬНЫЕ корни и создаем маппинг
+  std::vector<int> mapping(total_pixels + 1, 0);
+  int next_id = 1;
+  for (int i = 1; i <= total_pixels; ++i) {
+    if (is_root_used[i] != 0) {
+      mapping[i] = next_id++;
+    }
+  }
+  current_label_ = next_id - 1;
 
-  // Создаем локальный псевдоним для CPO-объекта
-  const auto &ranges_lb = std::ranges::lower_bound;
-
-#pragma omp parallel for default(none) shared(total_pixels, roots, ranges_lb) num_threads(n_threads)
+  // 3. В параллели обновляем метки через маппинг (O(1) доступ вместо lower_bound)
+#pragma omp parallel for default(none) shared(total_pixels, mapping) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      // Вызываем через ссылку, которую мы честно пробросили в shared
-      const auto it = ranges_lb(roots, labels_[i]);
-
-      // Чтобы не использовать std::ranges::distance (который тоже CPO и требует захвата),
-      // просто вычитаем итераторы. Для вектора это эффективно и легально.
-      labels_[i] = static_cast<int>(it - roots.begin()) + 1;
+      labels_[i] = mapping[labels_[i]];
     }
   }
 }
