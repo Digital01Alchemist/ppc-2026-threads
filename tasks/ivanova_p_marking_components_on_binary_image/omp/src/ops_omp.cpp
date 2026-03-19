@@ -2,10 +2,8 @@
 
 #include <omp.h>
 
-#include <algorithm>
 #include <atomic>
-#include <cstddef>
-#include <ranges>
+#include <cstdint>
 #include <string>
 #include <vector>
 
