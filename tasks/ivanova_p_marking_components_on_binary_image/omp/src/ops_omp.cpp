@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
-#include <numeric>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -170,7 +168,6 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
       roots.push_back(labels_[i]);
     }
   }
-
   std::ranges::sort(roots);
   // MSVC для std::ranges::unique возвращает subrange.
   // После упрощения нам нужен итератор на "новый конец" уникальных элементов.
@@ -182,10 +179,12 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
 #pragma omp parallel for default(none) shared(total_pixels, roots) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      // std::ranges::lower_bound — это CPO-объект; с OpenMP default(none) на GCC
+      // Используем ranges версию. Если GCC в CI упадет с ошибкой захвата CPO,
+      // то здесь придется либо добавить NOLINT, либо перечислить std::ranges::lower_bound в shared.
+      // Но std::ranges::lower_bound — это CPO-объект; с OpenMP default(none) на GCC
       // это может приводить к ошибкам "not specified in enclosing parallel".
-      const auto it = std::lower_bound(roots.begin(), roots.end(), labels_[i]);
-      labels_[i] = static_cast<int>(it - roots.begin()) + 1;
+      const auto it = std::ranges::lower_bound(roots, labels_[i]);
+      labels_[i] = static_cast<int>(std::ranges::distance(roots.begin(), it)) + 1;
     }
   }
 }
