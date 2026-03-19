@@ -78,11 +78,11 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
 }
 
 int IvanovaPMarkingComponentsOnBinaryImageOMP::FindRoot(int i) {
-  int root = i;
-  while (parent_[root] != root) {
-    root = parent_[root];
+  while (parent_[i] != i) {
+    parent_[i] = parent_[parent_[i]];  // Метод path halving — ускоряет поиск в разы
+    i = parent_[i];
   }
-  return root;
+  return i;
 }
 
 void IvanovaPMarkingComponentsOnBinaryImageOMP::UnionLabels(int i, int j) {
