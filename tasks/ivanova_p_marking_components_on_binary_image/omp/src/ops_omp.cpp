@@ -16,19 +16,14 @@ namespace ivanova_p_marking_components_on_binary_image {
 IvanovaPMarkingComponentsOnBinaryImageOMP::IvanovaPMarkingComponentsOnBinaryImageOMP(const InType &in) {
   SetTypeOfTask(GetStaticTypeOfTask());
   GetInput() = in;
-  // Инициализируем вывод пустым вектором, как в шаблоне (GetOutput() = 0)
   GetOutput().clear();
 }
 
 bool IvanovaPMarkingComponentsOnBinaryImageOMP::ValidationImpl() {
-  // Используем логику из твоего шаблона: номер теста должен быть положительным
   return GetInput() > 0;
 }
 
 bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
-  // В common.hpp test_image объявлен как static (внутренняя связность),
-  // поэтому у разных translation units это НЕ общая переменная.
-  // Поэтому OMP-реализация должна сама загружать/создавать входное изображение по GetInput().
   const int test_case = GetInput();
   if (test_case >= 11 && test_case <= 14) {
     std::string filename;
@@ -69,7 +64,6 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
 
   // Инициализация DSU
   parent_.resize(total_pixels + 1);
-  // std::ranges::iota недоступен на части libc++ в CI, поэтому инициализируем вручную.
   for (int i = 0; i <= total_pixels; ++i) {
     parent_[i] = i;
   }
@@ -79,7 +73,7 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
 
 int IvanovaPMarkingComponentsOnBinaryImageOMP::FindRoot(int i) {
   while (parent_[i] != i) {
-    parent_[i] = parent_[parent_[i]];  // Метод path halving — ускоряет поиск в разы
+    parent_[i] = parent_[parent_[i]];
     i = parent_[i];
   }
   return i;
@@ -162,8 +156,7 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::FinalizeRootsOmp(int total_pixel
 }
 
 void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pixels, int n_threads) {
-  // 1. Создаем временный массив для пометки используемых корней
-  // Используем uint8_t (bool), чтобы сэкономить память
+  // Создаем временный массив для пометки используемых корней
   std::vector<uint8_t> is_root_used(total_pixels + 1, 0);
 
 #pragma omp parallel for default(none) shared(total_pixels, is_root_used) num_threads(n_threads)
@@ -173,7 +166,7 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
     }
   }
 
-  // 2. Последовательно собираем только УНИКАЛЬНЫЕ корни и создаем маппинг
+  // Последовательно собираем только УНИКАЛЬНЫЕ корни и создаем маппинг
   std::vector<int> mapping(total_pixels + 1, 0);
   int next_id = 1;
   for (int i = 1; i <= total_pixels; ++i) {
@@ -183,7 +176,7 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pix
   }
   current_label_ = next_id - 1;
 
-  // 3. В параллели обновляем метки через маппинг (O(1) доступ вместо lower_bound)
+  // В параллели обновляем метки через маппинг (O(1) доступ вместо lower_bound)
 #pragma omp parallel for default(none) shared(total_pixels, mapping) num_threads(n_threads)
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
@@ -202,7 +195,7 @@ void IvanovaPMarkingComponentsOnBinaryImageOMP::TouchFrameworkOmp() {
 
 bool IvanovaPMarkingComponentsOnBinaryImageOMP::RunImpl() {
   const int n_threads = ppc::util::GetNumThreads();
-  (void)n_threads;  // clang-analyzer: pragmas не учитываются как read-подобная операция
+  (void)n_threads;
   const int total_pixels = width_ * height_;
 
   InitLabelsOmp(total_pixels, n_threads);
@@ -217,7 +210,6 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::RunImpl() {
 bool IvanovaPMarkingComponentsOnBinaryImageOMP::PostProcessingImpl() {
   OutType &output = GetOutput();
   output.clear();
-  // Формат: [W, H, Count, data...]
   output.push_back(width_);
   output.push_back(height_);
   output.push_back(current_label_);
