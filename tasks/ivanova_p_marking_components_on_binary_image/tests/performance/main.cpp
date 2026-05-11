@@ -3,6 +3,7 @@
 #include "ivanova_p_marking_components_on_binary_image/common/include/common.hpp"
 #include "ivanova_p_marking_components_on_binary_image/data/image_generator.hpp"
 #include "ivanova_p_marking_components_on_binary_image/seq/include/ops_seq.hpp"
+#include "ivanova_p_marking_components_on_binary_image/tbb/include/ops_tbb.hpp"
 #include "util/include/perf_test_util.hpp"
 
 namespace ivanova_p_marking_components_on_binary_image {
@@ -37,8 +38,11 @@ TEST_P(IvanovaPRunPerfTestsThreads, RunPerfModes) {
 
 namespace {
 
-const auto kAllPerfTasks = ppc::util::MakeAllPerfTasks<InType, IvanovaPMarkingComponentsOnBinaryImageSEQ>(
-    PPC_SETTINGS_ivanova_p_marking_components_on_binary_image);
+const auto kAllPerfTasks =
+    std::tuple_cat(ppc::util::MakeAllPerfTasks<InType, IvanovaPMarkingComponentsOnBinaryImageSEQ>(
+                       PPC_SETTINGS_ivanova_p_marking_components_on_binary_image),
+                   ppc::util::MakeAllPerfTasks<InType, IvanovaPMarkingComponentsOnBinaryImageTBB>(
+                       PPC_SETTINGS_ivanova_p_marking_components_on_binary_image));
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
