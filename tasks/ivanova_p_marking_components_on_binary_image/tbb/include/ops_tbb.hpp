@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tbb/tbb.h>
+
 #include <vector>
 
 #include "ivanova_p_marking_components_on_binary_image/common/include/common.hpp"

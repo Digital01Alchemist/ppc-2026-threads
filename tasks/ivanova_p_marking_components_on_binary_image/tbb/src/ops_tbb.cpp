@@ -1,9 +1,12 @@
 #include "ivanova_p_marking_components_on_binary_image/tbb/include/ops_tbb.hpp"
-#include "ivanova_p_marking_components_on_binary_image/data/image_generator.hpp"
+
 #include <tbb/tbb.h>
+
 #include <algorithm>
 #include <string>
 #include <vector>
+
+#include "ivanova_p_marking_components_on_binary_image/data/image_generator.hpp"
 
 namespace ivanova_p_marking_components_on_binary_image {
 
@@ -11,7 +14,7 @@ IvanovaPMarkingComponentsOnBinaryImageTBB::IvanovaPMarkingComponentsOnBinaryImag
   SetTypeOfTask(GetStaticTypeOfTask());
   GetInput() = in;
   GetOutput().clear();
-  
+
   // КРИТИЧНО: Сбрасываем глобальное изображение для чистоты тестов
   test_image.width = 0;
   test_image.height = 0;
@@ -24,10 +27,18 @@ bool IvanovaPMarkingComponentsOnBinaryImageTBB::ValidationImpl() {
     if (test_case >= 11 && test_case <= 14) {
       std::string filename;
       switch (test_case) {
-        case 11: filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image.txt"; break;
-        case 12: filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image2.txt"; break;
-        case 13: filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image3.txt"; break;
-        case 14: filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image4.txt"; break;
+        case 11:
+          filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image.txt";
+          break;
+        case 12:
+          filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image2.txt";
+          break;
+        case 13:
+          filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image3.txt";
+          break;
+        case 14:
+          filename = "tasks/ivanova_p_marking_components_on_binary_image/data/image4.txt";
+          break;
       }
       test_image = LoadImageFromTxt(filename);
     } else {
@@ -45,7 +56,9 @@ bool IvanovaPMarkingComponentsOnBinaryImageTBB::PreProcessingImpl() {
 
   labels_.assign(total_pixels, 0);
   parent_.resize(total_pixels + 1);
-  for (int i = 0; i <= total_pixels; ++i) parent_[i] = i;
+  for (int i = 0; i <= total_pixels; ++i) {
+    parent_[i] = i;
+  }
 
   current_label_ = 0;
   return true;
@@ -64,8 +77,11 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::UnionLabels(int i, int j) {
   int root_i = FindRoot(i);
   int root_j = FindRoot(j);
   if (root_i != root_j) {
-    if (root_i < root_j) parent_[root_j] = root_i;
-    else parent_[root_i] = root_j;
+    if (root_i < root_j) {
+      parent_[root_j] = root_i;
+    } else {
+      parent_[root_i] = root_j;
+    }
   }
 }
 
@@ -125,7 +141,9 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::NormalizeLabelsTbb(int total_pix
 
 bool IvanovaPMarkingComponentsOnBinaryImageTBB::RunImpl() {
   int total_pixels = width_ * height_;
-  if (total_pixels <= 0) return true;
+  if (total_pixels <= 0) {
+    return true;
+  }
 
   InitLabelsTbb(total_pixels);
   MergeHorizontalPairsTbb();
@@ -143,7 +161,9 @@ bool IvanovaPMarkingComponentsOnBinaryImageTBB::PostProcessingImpl() {
   output.push_back(width_);
   output.push_back(height_);
   output.push_back(current_label_);
-  for (int l : labels_) output.push_back(l);
+  for (int l : labels_) {
+    output.push_back(l);
+  }
   return true;
 }
 
