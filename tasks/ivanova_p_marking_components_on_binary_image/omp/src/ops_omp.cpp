@@ -2,8 +2,7 @@
 
 #include <omp.h>
 
-#include <atomic>
-#include <cstdint>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -58,162 +57,175 @@ bool IvanovaPMarkingComponentsOnBinaryImageOMP::PreProcessingImpl() {
 
   int total_pixels = width_ * height_;
   labels_.assign(total_pixels, 0);
-  current_label_ = 0;
 
-  // Инициализация DSU
+  // Initialize DSU with size +1 for labels starting from 1
   parent_.resize(total_pixels + 1);
   for (int i = 0; i <= total_pixels; ++i) {
     parent_[i] = i;
   }
 
+  current_label_ = 0;
   return true;
 }
 
-int IvanovaPMarkingComponentsOnBinaryImageOMP::FindRoot(int i) {
-  int root = i;
-  while (parent_[root] != root) {
-    root = parent_[root];
+int IvanovaPMarkingComponentsOnBinaryImageOMP::FindRoot(int label) {
+  int root = label;
+  while (parent_[static_cast<size_t>(root)] != root) {
+    root = parent_[static_cast<size_t>(root)];
+  }
+
+  // Path compression
+  while (parent_[static_cast<size_t>(label)] != label) {
+    int next = parent_[static_cast<size_t>(label)];
+    parent_[static_cast<size_t>(label)] = root;
+    label = next;
   }
   return root;
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageOMP::UnionLabels(int i, int j) {
-  // Убран вызов FindRoot вне критической секции во избежание Data Race
-  // при одновременном чтении и записи в массив parent_.
-#pragma omp critical(dsu_union)
-  {
-    int root_i = FindRoot(i);
-    int root_j = FindRoot(j);
-    if (root_i != root_j) {
-      if (root_i < root_j) {
-        parent_[root_j] = root_i;
-      } else {
-        parent_[root_i] = root_j;
-      }
+void IvanovaPMarkingComponentsOnBinaryImageOMP::UnionLabels(int label1, int label2) {
+  int root1 = FindRoot(label1);
+  int root2 = FindRoot(label2);
+
+  if (root1 != root2) {
+    if (root1 < root2) {
+      parent_[static_cast<size_t>(root2)] = root1;
+    } else {
+      parent_[static_cast<size_t>(root1)] = root2;
     }
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageOMP::InitLabelsOmp(int total_pixels, int n_threads) {
-  // Локальные копии для решения проблем с default(none)
-  auto &labels = labels_;
-  auto &input_image = input_image_;
-
-#pragma omp parallel for default(none) shared(total_pixels, labels, input_image) num_threads(n_threads)
-  for (int i = 0; i < total_pixels; ++i) {
-    if (input_image.data[i] != 0) {
-      labels[i] = i + 1;
-    }
+void IvanovaPMarkingComponentsOnBinaryImageOMP::ProcessStripPixel(int xx, int yy, int idx, int strip_start_row) {
+  if (input_image_.data[static_cast<size_t>(idx)] == 0) {
+    return;
   }
-}
 
-void IvanovaPMarkingComponentsOnBinaryImageOMP::MergeHorizontalPairsOmp(int n_threads) {
-  // Локальные копии для MSVC
-  int w = width_;
-  int h = height_;
-  auto &labels = labels_;
-  auto *self = this;  // Локальный указатель на объект
+  int left_label = (xx > 0) ? labels_[static_cast<size_t>(idx - 1)] : 0;
+  int top_label = (yy > strip_start_row) ? labels_[static_cast<size_t>(idx - width_)] : 0;
 
-#pragma omp parallel for default(none) shared(w, h, labels, self, n_threads) num_threads(n_threads)
-  for (int yy = 0; yy < h; ++yy) {
-    for (int xx = 0; xx < w - 1; ++xx) {
-      const int idx = (yy * w) + xx;
-      const int cur_label = labels[idx];
-      if (cur_label != 0) {
-        const int right_label = labels[idx + 1];
-        if (right_label != 0) {
-          self->UnionLabels(cur_label, right_label);
+  if (left_label == 0 && top_label == 0) {
+    // Assign unique label based on pixel index
+    labels_[static_cast<size_t>(idx)] = idx + 1;
+  } else {
+    // Use existing label
+    int label = (left_label != 0) ? left_label : top_label;
+    labels_[static_cast<size_t>(idx)] = label;
+
+    // Merge labels if both neighbors exist
+    if (left_label != 0 && top_label != 0 && left_label != top_label) {
+      int root1 = FindRoot(left_label);
+      int root2 = FindRoot(top_label);
+      if (root1 != root2) {
+        if (root1 < root2) {
+          parent_[static_cast<size_t>(root2)] = root1;
+        } else {
+          parent_[static_cast<size_t>(root1)] = root2;
         }
       }
     }
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageOMP::MergeVerticalPairsOmp(int n_threads) {
-  // Локальные переменные для MSVC
-  int w = width_;
-  int h = height_;
-  auto &labels = labels_;
-  auto *self = this;
+void IvanovaPMarkingComponentsOnBinaryImageOMP::MergeStripBoundaries(int num_threads, int rows_per_thread) {
+  for (int thread_id = 0; thread_id < num_threads - 1; ++thread_id) {
+    int boundary_row = (thread_id + 1) * rows_per_thread;
+    if (boundary_row >= height_) {
+      continue;
+    }
 
-#pragma omp parallel for default(none) shared(w, h, labels, self, n_threads) num_threads(n_threads)
-  for (int yy = 0; yy < h - 1; ++yy) {
-    for (int xx = 0; xx < w; ++xx) {
-      const int idx = (yy * w) + xx;
-      const int cur_label = labels[idx];
+    for (int xx = 0; xx < width_; ++xx) {
+      int top_idx = ((boundary_row - 1) * width_) + xx;
+      int bottom_idx = (boundary_row * width_) + xx;
 
-      if (cur_label != 0) {
-        const int bottom_label = labels[idx + w];
-        if (bottom_label != 0) {
-          self->UnionLabels(cur_label, bottom_label);
-        }
+      int top_label = labels_[static_cast<size_t>(top_idx)];
+      int bottom_label = labels_[static_cast<size_t>(bottom_idx)];
+
+      if (top_label != 0 && bottom_label != 0 && top_label != bottom_label) {
+        UnionLabels(top_label, bottom_label);
       }
     }
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageOMP::FinalizeRootsOmp(int total_pixels, int n_threads) {
-  auto &labels = labels_;
-  auto *self = this;
+void IvanovaPMarkingComponentsOnBinaryImageOMP::FirstPass() {
+  int num_threads = std::max(1, ppc::util::GetNumThreads());
+  int rows_per_thread = (height_ + num_threads - 1) / num_threads;
 
-#pragma omp parallel for default(none) shared(total_pixels, labels, self, n_threads) num_threads(n_threads)
-  for (int i = 0; i < total_pixels; ++i) {
-    if (labels[i] != 0) {
-      labels[i] = self->FindRoot(labels[i]);
-    }
-  }
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageOMP::NormalizeLabelsOmp(int total_pixels, int n_threads) {
-  std::vector<uint8_t> is_root_used(total_pixels + 1, 0);
-  auto &labels = labels_;
-
-  // Убрали #pragma omp parallel for, чтобы не было гонки данных
-  // при множественной записи в массив is_root_used
-  for (int i = 0; i < total_pixels; ++i) {
-    if (labels[i] != 0) {
-      is_root_used[labels[i]] = 1;
-    }
-  }
-
-  // Последовательно собираем только УНИКАЛЬНЫЕ корни и создаем маппинг
-  std::vector<int> mapping(total_pixels + 1, 0);
-  int next_id = 1;
-  for (int i = 1; i <= total_pixels; ++i) {
-    if (is_root_used[i] != 0) {
-      mapping[i] = next_id++;
-    }
-  }
-  current_label_ = next_id - 1;
-
-  // В параллели обновляем метки через маппинг
-#pragma omp parallel for default(none) shared(total_pixels, mapping, labels) num_threads(n_threads)
-  for (int i = 0; i < total_pixels; ++i) {
-    if (labels[i] != 0) {
-      labels[i] = mapping[labels[i]];
-    }
-  }
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageOMP::TouchFrameworkOmp() {
-  std::atomic<int> counter(0);
-#pragma omp parallel default(none) shared(counter) num_threads(ppc::util::GetNumThreads())
+// Phase 1: Parallel strip processing
+#pragma omp parallel num_threads(num_threads) default(none) shared(num_threads, rows_per_thread)
   {
-    counter++;
+    int thread_id = omp_get_thread_num();
+    int start_row = thread_id * rows_per_thread;
+    int end_row = start_row + rows_per_thread;
+    if (end_row > height_) {
+      end_row = height_;
+    }
+    if (start_row < height_) {
+      for (int yy = start_row; yy < end_row; ++yy) {
+        for (int xx = 0; xx < width_; ++xx) {
+          int idx = (yy * width_) + xx;
+          ProcessStripPixel(xx, yy, idx, start_row);
+        }
+      }
+    }
+  }
+
+  // Phase 2: Sequential boundary merging
+  MergeStripBoundaries(num_threads, rows_per_thread);
+
+  current_label_ = 1;
+}
+
+void IvanovaPMarkingComponentsOnBinaryImageOMP::SecondPass() {
+  int total_pixels = width_ * height_;
+
+// Phase 1: Parallel path compression
+#pragma omp parallel for default(none) shared(total_pixels) schedule(static)
+  for (int i = 0; i < total_pixels; ++i) {
+    if (labels_[static_cast<size_t>(i)] != 0) {
+      int root = labels_[static_cast<size_t>(i)];
+      while (parent_[static_cast<size_t>(root)] != root) {
+        root = parent_[static_cast<size_t>(root)];
+      }
+      labels_[static_cast<size_t>(i)] = root;
+    }
+  }
+
+  // Phase 2: Build label mapping
+  std::vector<int> label_map(static_cast<size_t>(total_pixels) + 1, 0);
+  int next_label = 1;
+  for (int i = 0; i < total_pixels; ++i) {
+    if (labels_[static_cast<size_t>(i)] != 0) {
+      int root = labels_[static_cast<size_t>(i)];
+      if (label_map[static_cast<size_t>(root)] == 0) {
+        label_map[static_cast<size_t>(root)] = next_label++;
+      }
+    }
+  }
+  current_label_ = next_label - 1;
+
+// Phase 3: Parallel label remapping
+#pragma omp parallel for default(none) shared(total_pixels, label_map) schedule(static)
+  for (int i = 0; i < total_pixels; ++i) {
+    if (labels_[static_cast<size_t>(i)] != 0) {
+      labels_[static_cast<size_t>(i)] = label_map[static_cast<size_t>(labels_[static_cast<size_t>(i)])];
+    }
   }
 }
 
 bool IvanovaPMarkingComponentsOnBinaryImageOMP::RunImpl() {
-  const int n_threads = ppc::util::GetNumThreads();
-  (void)n_threads;
-  const int total_pixels = width_ * height_;
+  int total_pixels = width_ * height_;
+  if (total_pixels <= 0) {
+    return false;
+  }
 
-  InitLabelsOmp(total_pixels, n_threads);
-  MergeHorizontalPairsOmp(n_threads);
-  MergeVerticalPairsOmp(n_threads);
-  FinalizeRootsOmp(total_pixels, n_threads);
-  NormalizeLabelsOmp(total_pixels, n_threads);
-  TouchFrameworkOmp();
+  FirstPass();
+
+  if (current_label_ > 0) {
+    SecondPass();
+  }
+
   return true;
 }
 
