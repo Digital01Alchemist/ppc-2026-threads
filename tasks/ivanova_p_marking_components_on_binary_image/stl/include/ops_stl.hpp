@@ -32,9 +32,16 @@ class IvanovaPMarkingComponentsOnBinaryImageSTL : public BaseTask {
   void FirstPass();
   void SecondPass();
 
-  // Helper methods for strip-based processing
-  void ProcessStripPixel(int xx, int yy, int idx, int strip_start_row);
+  // Helper methods for strip-based processing with local DSU
+  void ProcessStripPixel(int xx, int yy, int idx, int strip_start_row, std::vector<int> &local_parent,
+                         int &local_label);
   void MergeStripBoundaries(int num_threads, int rows_per_thread);
+  static int FindLocalRoot(int label, const std::vector<int> &local_parent);
+  static void UnionLocalLabels(int label1, int label2, std::vector<int> &local_parent);
+  static void InitializeLocalParent(std::vector<int> &local_parent, int max_labels);
+  void ProcessStrip(int start_row, int end_row, std::vector<int> &local_parent, int &local_label);
+  void MergeLocalParents(const std::vector<std::vector<int>> &local_parents, const std::vector<int> &local_labels,
+                         int num_threads, int total_pixels);
 };
 
 }  // namespace ivanova_p_marking_components_on_binary_image
