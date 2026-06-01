@@ -1,7 +1,5 @@
 #pragma once
 
-#include <tbb/tbb.h>
-
 #include <vector>
 
 #include "ivanova_p_marking_components_on_binary_image/common/include/common.hpp"
@@ -9,12 +7,12 @@
 
 namespace ivanova_p_marking_components_on_binary_image {
 
-class IvanovaPMarkingComponentsOnBinaryImageTBB : public BaseTask {
+class IvanovaPMarkingComponentsOnBinaryImageOMP : public BaseTask {
  public:
   static constexpr ppc::task::TypeOfTask GetStaticTypeOfTask() {
-    return ppc::task::TypeOfTask::kTBB;
+    return ppc::task::TypeOfTask::kOMP;
   }
-  explicit IvanovaPMarkingComponentsOnBinaryImageTBB(const InType &in);
+  explicit IvanovaPMarkingComponentsOnBinaryImageOMP(const InType &in);
 
  private:
   bool ValidationImpl() override;
@@ -29,14 +27,17 @@ class IvanovaPMarkingComponentsOnBinaryImageTBB : public BaseTask {
   int height_ = 0;
   int current_label_ = 0;
 
+  // Core Union-Find operations
   int FindRoot(int label);
   void UnionLabels(int label1, int label2);
-  void FirstPass();
-  void SecondPass();
 
-  // Helper methods for strip-based processing
+  // Stripe processing
   void ProcessStripPixel(int xx, int yy, int idx, int strip_start_row);
   void MergeStripBoundaries(int num_threads, int rows_per_thread);
+
+  // Two-pass algorithm
+  void FirstPass();
+  void SecondPass();
 };
 
 }  // namespace ivanova_p_marking_components_on_binary_image

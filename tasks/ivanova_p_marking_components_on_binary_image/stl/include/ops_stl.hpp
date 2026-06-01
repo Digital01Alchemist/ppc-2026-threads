@@ -1,7 +1,5 @@
 #pragma once
 
-#include <tbb/tbb.h>
-
 #include <vector>
 
 #include "ivanova_p_marking_components_on_binary_image/common/include/common.hpp"
@@ -9,12 +7,12 @@
 
 namespace ivanova_p_marking_components_on_binary_image {
 
-class IvanovaPMarkingComponentsOnBinaryImageTBB : public BaseTask {
+class IvanovaPMarkingComponentsOnBinaryImageSTL : public BaseTask {
  public:
   static constexpr ppc::task::TypeOfTask GetStaticTypeOfTask() {
-    return ppc::task::TypeOfTask::kTBB;
+    return ppc::task::TypeOfTask::kSTL;
   }
-  explicit IvanovaPMarkingComponentsOnBinaryImageTBB(const InType &in);
+  explicit IvanovaPMarkingComponentsOnBinaryImageSTL(const InType &in);
 
  private:
   bool ValidationImpl() override;
@@ -25,9 +23,9 @@ class IvanovaPMarkingComponentsOnBinaryImageTBB : public BaseTask {
   Image input_image_;
   std::vector<int> labels_;
   std::vector<int> parent_;
+  int current_label_ = 0;
   int width_ = 0;
   int height_ = 0;
-  int current_label_ = 0;
 
   int FindRoot(int label);
   void UnionLabels(int label1, int label2);

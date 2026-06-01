@@ -1,21 +1,25 @@
 #include <gtest/gtest.h>
 
+#include "ivanova_p_marking_components_on_binary_image/all/include/ops_all.hpp"
 #include "ivanova_p_marking_components_on_binary_image/common/include/common.hpp"
 #include "ivanova_p_marking_components_on_binary_image/data/image_generator.hpp"
+#include "ivanova_p_marking_components_on_binary_image/omp/include/ops_omp.hpp"
 #include "ivanova_p_marking_components_on_binary_image/seq/include/ops_seq.hpp"
+#include "ivanova_p_marking_components_on_binary_image/stl/include/ops_stl.hpp"
 #include "ivanova_p_marking_components_on_binary_image/tbb/include/ops_tbb.hpp"
 #include "util/include/perf_test_util.hpp"
 
 namespace ivanova_p_marking_components_on_binary_image {
 
 class IvanovaPRunPerfTestsThreads : public ppc::util::BaseRunPerfTests<InType, OutType> {
-  const int kSize_ = 512;
+  const int kSize_ = 500;
   InType input_data_ = 0;
 
   void SetUp() override {
     test_image = CreateTestImage(kSize_, kSize_, 8);  // Например, тест 8 с множеством компонент
 
-    input_data_ = 1;  // Произвольное положительное число
+    // Кодируем размер 500 и тип теста 8 для тестов производительности
+    input_data_ = EncodeTestCase(500, 8);
   }
 
   bool CheckTestOutputData(OutType &output_data) final {
@@ -39,10 +43,10 @@ TEST_P(IvanovaPRunPerfTestsThreads, RunPerfModes) {
 namespace {
 
 const auto kAllPerfTasks =
-    std::tuple_cat(ppc::util::MakeAllPerfTasks<InType, IvanovaPMarkingComponentsOnBinaryImageSEQ>(
-                       PPC_SETTINGS_ivanova_p_marking_components_on_binary_image),
-                   ppc::util::MakeAllPerfTasks<InType, IvanovaPMarkingComponentsOnBinaryImageTBB>(
-                       PPC_SETTINGS_ivanova_p_marking_components_on_binary_image));
+    ppc::util::MakeAllPerfTasks<InType, IvanovaPMarkingComponentsOnBinaryImageSEQ,
+                                IvanovaPMarkingComponentsOnBinaryImageTBB, IvanovaPMarkingComponentsOnBinaryImageSTL,
+                                IvanovaPMarkingComponentsOnBinaryImageALL, IvanovaPMarkingComponentsOnBinaryImageOMP>(
+        PPC_SETTINGS_ivanova_p_marking_components_on_binary_image);
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
