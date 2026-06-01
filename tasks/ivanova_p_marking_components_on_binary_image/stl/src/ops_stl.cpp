@@ -145,17 +145,26 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessStripPixel(int xx, int yy
   int top_label = (yy > strip_start_row) ? labels_[static_cast<size_t>(idx - width_)] : 0;
 
   if (left_label == 0 && top_label == 0) {
-    // Assign unique label based on pixel index
     labels_[static_cast<size_t>(idx)] = idx + 1;
+  } else if (left_label != 0 && top_label == 0) {
+    labels_[static_cast<size_t>(idx)] = left_label;
+  } else if (left_label == 0 && top_label != 0) {
+    labels_[static_cast<size_t>(idx)] = top_label;
   } else {
-    // Use existing label
-    int label = (left_label != 0) ? left_label : top_label;
-    labels_[static_cast<size_t>(idx)] = label;
-
-    // Merge labels if both neighbors exist
-    if (left_label != 0 && top_label != 0 && left_label != top_label) {
-      int root1 = FindRoot(left_label);
-      int root2 = FindRoot(top_label);
+    // Both neighbors exist
+    if (left_label == top_label) {
+      labels_[static_cast<size_t>(idx)] = left_label;
+    } else {
+      labels_[static_cast<size_t>(idx)] = left_label;
+      // Inline union for better performance
+      int root1 = left_label;
+      while (parent_[static_cast<size_t>(root1)] != root1) {
+        root1 = parent_[static_cast<size_t>(root1)];
+      }
+      int root2 = top_label;
+      while (parent_[static_cast<size_t>(root2)] != root2) {
+        root2 = parent_[static_cast<size_t>(root2)];
+      }
       if (root1 != root2) {
         if (root1 < root2) {
           parent_[static_cast<size_t>(root2)] = root1;
@@ -225,35 +234,36 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::FirstPass() {
 
 void IvanovaPMarkingComponentsOnBinaryImageSTL::SecondPass() {
   int total_pixels = width_ * height_;
-
-  // Phase 1: Parallel path compression
-  std::vector<std::thread> threads;
   int num_threads = ppc::util::GetNumThreads();
   int chunk_size = (total_pixels + num_threads - 1) / num_threads;
 
-  threads.reserve(static_cast<size_t>(num_threads));
-  for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
-    threads.emplace_back([this, thread_id, chunk_size, total_pixels]() {
-      int start = thread_id * chunk_size;
-      int end = std::min(start + chunk_size, total_pixels);
+  // Phase 1: Parallel path compression
+  {
+    std::vector<std::thread> threads;
+    threads.reserve(static_cast<size_t>(num_threads));
+    for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+      threads.emplace_back([this, thread_id, chunk_size, total_pixels]() {
+        int start = thread_id * chunk_size;
+        int end = std::min(start + chunk_size, total_pixels);
 
-      for (int i = start; i < end; ++i) {
-        if (labels_[static_cast<size_t>(i)] != 0) {
-          int root = labels_[static_cast<size_t>(i)];
-          while (parent_[static_cast<size_t>(root)] != root) {
-            root = parent_[static_cast<size_t>(root)];
+        for (int i = start; i < end; ++i) {
+          if (labels_[static_cast<size_t>(i)] != 0) {
+            int root = labels_[static_cast<size_t>(i)];
+            while (parent_[static_cast<size_t>(root)] != root) {
+              root = parent_[static_cast<size_t>(root)];
+            }
+            labels_[static_cast<size_t>(i)] = root;
           }
-          labels_[static_cast<size_t>(i)] = root;
         }
-      }
-    });
+      });
+    }
+
+    for (auto &thread : threads) {
+      thread.join();
+    }
   }
 
-  for (auto &thread : threads) {
-    thread.join();
-  }
-
-  // Phase 2: Build label mapping
+  // Phase 2: Build label mapping (sequential - fast enough)
   std::vector<int> label_map(static_cast<size_t>(total_pixels) + 1, 0);
   int next_label = 1;
   for (int i = 0; i < total_pixels; ++i) {
@@ -267,23 +277,25 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::SecondPass() {
   current_label_ = next_label - 1;
 
   // Phase 3: Parallel label remapping
-  threads.clear();
-  threads.reserve(static_cast<size_t>(num_threads));
-  for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
-    threads.emplace_back([this, thread_id, chunk_size, total_pixels, &label_map]() {
-      int start = thread_id * chunk_size;
-      int end = std::min(start + chunk_size, total_pixels);
+  {
+    std::vector<std::thread> threads;
+    threads.reserve(static_cast<size_t>(num_threads));
+    for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+      threads.emplace_back([this, thread_id, chunk_size, total_pixels, &label_map]() {
+        int start = thread_id * chunk_size;
+        int end = std::min(start + chunk_size, total_pixels);
 
-      for (int i = start; i < end; ++i) {
-        if (labels_[static_cast<size_t>(i)] != 0) {
-          labels_[static_cast<size_t>(i)] = label_map[static_cast<size_t>(labels_[static_cast<size_t>(i)])];
+        for (int i = start; i < end; ++i) {
+          if (labels_[static_cast<size_t>(i)] != 0) {
+            labels_[static_cast<size_t>(i)] = label_map[static_cast<size_t>(labels_[static_cast<size_t>(i)])];
+          }
         }
-      }
-    });
-  }
+      });
+    }
 
-  for (auto &thread : threads) {
-    thread.join();
+    for (auto &thread : threads) {
+      thread.join();
+    }
   }
 }
 
