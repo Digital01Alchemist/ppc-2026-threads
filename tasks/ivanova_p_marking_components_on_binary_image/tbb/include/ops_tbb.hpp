@@ -31,21 +31,12 @@ class IvanovaPMarkingComponentsOnBinaryImageTBB : public BaseTask {
 
   int FindRoot(int label);
   void UnionLabels(int label1, int label2);
-  void ProcessPixel(int xx, int yy, int idx);
   void FirstPass();
   void SecondPass();
 
-  void InitLabelsTbb(int total_pixels);
-  void MergeHorizontalPairsTbb();
-  void MergeVerticalPairsTbb();
-  void FinalizeRootsTbb(int total_pixels);
-  void NormalizeLabelsTbb(int total_pixels);
-
-  // Helper methods to reduce cognitive complexity
-  void ProcessStripePixel(int xx, int yy, int idx, int start_row);
-  int FindLocalRoot(int label);
-  void UnionLocalRoots(int root1, int root2);
-  void MergeBoundariesTbb(int num_threads, int rows_per_thread);
+  // Helper methods for strip-based processing
+  void ProcessStripPixel(int xx, int yy, int idx, int strip_start_row);
+  void MergeStripBoundaries(int num_threads, int rows_per_thread);
 };
 
 }  // namespace ivanova_p_marking_components_on_binary_image

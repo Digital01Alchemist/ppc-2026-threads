@@ -33,21 +33,16 @@ class IvanovaPMarkingComponentsOnBinaryImageSTL : public BaseTask {
   void FirstPass();
   void SecondPass();
 
-  void InitLabelsStl(int total_pixels, int num_threads);
-  void MergeHorizontalPairsStl(int num_threads);
-  void MergeVerticalPairsStl(int num_threads);
-  void FinalizeRootsStl(int total_pixels, int num_threads);
-  void NormalizeLabelsStl(int total_pixels);
-
-  // Helper methods to reduce cognitive complexity
-  void ProcessStripePixelStl(int xx, int yy, int idx, int start_row, std::vector<int> &local_parent, int &local_label);
-  static int FindLocalRootStl(int label, const std::vector<int> &local_parent);
-  static void UnionLocalLabelsStl(int label1, int label2, std::vector<int> &local_parent);
-  static void InitializeLocalParentStl(std::vector<int> &local_parent, int max_labels);
-  void ProcessStripeStl(int start_row, int end_row, std::vector<int> &local_parent, int &local_label);
-  void MergeBoundariesStl(int num_threads, int rows_per_thread);
-  void MergeLocalParentsStl(const std::vector<std::vector<int>> &local_parents, const std::vector<int> &local_labels,
-                            int num_threads, int total_pixels);
+  // Helper methods for strip-based processing with local DSU
+  void ProcessStripPixel(int xx, int yy, int idx, int strip_start_row, std::vector<int> &local_parent,
+                         int &local_label);
+  void MergeStripBoundaries(int num_threads, int rows_per_thread);
+  static int FindLocalRoot(int label, const std::vector<int> &local_parent);
+  static void UnionLocalLabels(int label1, int label2, std::vector<int> &local_parent);
+  static void InitializeLocalParent(std::vector<int> &local_parent, int max_labels);
+  void ProcessStrip(int start_row, int end_row, std::vector<int> &local_parent, int &local_label);
+  void MergeLocalParents(const std::vector<std::vector<int>> &local_parents, const std::vector<int> &local_labels,
+                         int num_threads, int total_pixels);
 };
 
 }  // namespace ivanova_p_marking_components_on_binary_image

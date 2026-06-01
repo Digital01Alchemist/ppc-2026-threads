@@ -99,68 +99,38 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::UnionLabels(int label1, int labe
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageTBB::ProcessPixel(int xx, int yy, int idx) {
-  int left_label = (xx > 0) ? labels_[idx - 1] : 0;
-  int top_label = (yy > 0) ? labels_[idx - width_] : 0;
-
-  bool left_exists = (left_label != 0);
-  bool top_exists = (top_label != 0);
-
-  if (!left_exists && !top_exists) {
-    current_label_++;
-    labels_[idx] = current_label_;
-    parent_[current_label_] = current_label_;
-  } else {
-    int label = left_exists ? left_label : top_label;
-    labels_[idx] = label;
-
-    if (left_exists && top_exists && left_label != top_label) {
-      UnionLabels(std::min(left_label, top_label), std::max(left_label, top_label));
-    }
-  }
-}
-
-int IvanovaPMarkingComponentsOnBinaryImageTBB::FindLocalRoot(int label) {
-  int root = label;
-  while (parent_[root] != root) {
-    root = parent_[root];
-  }
-  return root;
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::UnionLocalRoots(int root1, int root2) {
-  if (root1 != root2) {
-    if (root1 < root2) {
-      parent_[root2] = root1;
-    } else {
-      parent_[root1] = root2;
-    }
-  }
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::ProcessStripePixel(int xx, int yy, int idx, int start_row) {
+void IvanovaPMarkingComponentsOnBinaryImageTBB::ProcessStripPixel(int xx, int yy, int idx, int strip_start_row) {
   if (input_image_.data[idx] == 0) {
     return;
   }
 
   int left_label = (xx > 0) ? labels_[idx - 1] : 0;
-  int top_label = (yy > start_row) ? labels_[idx - width_] : 0;
+  int top_label = (yy > strip_start_row) ? labels_[idx - width_] : 0;
 
   if (left_label == 0 && top_label == 0) {
+    // Assign unique label based on pixel index
     labels_[idx] = idx + 1;
   } else {
+    // Use existing label
     int label = (left_label != 0) ? left_label : top_label;
     labels_[idx] = label;
 
+    // Merge labels if both neighbors exist
     if (left_label != 0 && top_label != 0 && left_label != top_label) {
-      int root1 = FindLocalRoot(left_label);
-      int root2 = FindLocalRoot(top_label);
-      UnionLocalRoots(root1, root2);
+      int root1 = FindRoot(left_label);
+      int root2 = FindRoot(top_label);
+      if (root1 != root2) {
+        if (root1 < root2) {
+          parent_[root2] = root1;
+        } else {
+          parent_[root1] = root2;
+        }
+      }
     }
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageTBB::MergeBoundariesTbb(int num_threads, int rows_per_thread) {
+void IvanovaPMarkingComponentsOnBinaryImageTBB::MergeStripBoundaries(int num_threads, int rows_per_thread) {
   for (int thread_id = 0; thread_id < num_threads - 1; ++thread_id) {
     int boundary_row = (thread_id + 1) * rows_per_thread;
     if (boundary_row >= height_) {
@@ -185,7 +155,7 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::FirstPass() {
   int num_threads = std::max(1, tbb::this_task_arena::max_concurrency());
   int rows_per_thread = (height_ + num_threads - 1) / num_threads;
 
-  // Фаза 1: Истинная параллельная обработка независимых полос
+  // Phase 1: Parallel strip processing
   tbb::parallel_for(0, num_threads, [&](int thread_id) {
     int start_row = thread_id * rows_per_thread;
     int end_row = std::min(start_row + rows_per_thread, height_);
@@ -196,13 +166,13 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::FirstPass() {
     for (int yy = start_row; yy < end_row; ++yy) {
       for (int xx = 0; xx < width_; ++xx) {
         int idx = (yy * width_) + xx;
-        ProcessStripePixel(xx, yy, idx, start_row);
+        ProcessStripPixel(xx, yy, idx, start_row);
       }
     }
   });
 
-  // Фаза 2: Быстрое последовательное объединение на стыках полос
-  MergeBoundariesTbb(num_threads, rows_per_thread);
+  // Phase 2: Sequential boundary merging
+  MergeStripBoundaries(num_threads, rows_per_thread);
 
   current_label_ = 1;
 }
@@ -210,7 +180,7 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::FirstPass() {
 void IvanovaPMarkingComponentsOnBinaryImageTBB::SecondPass() {
   int total_pixels = width_ * height_;
 
-  // 1. Параллельно сжимаем пути для всех пикселей
+  // Phase 1: Parallel path compression
   tbb::parallel_for(0, total_pixels, [&](int i) {
     if (labels_[i] != 0) {
       int root = labels_[i];
@@ -221,46 +191,25 @@ void IvanovaPMarkingComponentsOnBinaryImageTBB::SecondPass() {
     }
   });
 
-  // 2. Быстрый проход для создания непрерывных ID
-  // ИСПРАВЛЕНИЕ: Вектор должен вмещать метки вплоть до total_pixels
-  std::vector<int> root_mapping(total_pixels + 1, 0);
+  // Phase 2: Build label mapping
+  std::vector<int> label_map(static_cast<size_t>(total_pixels) + 1, 0);
   int next_label = 1;
   for (int i = 0; i < total_pixels; ++i) {
     if (labels_[i] != 0) {
-      int r = labels_[i];
-      if (root_mapping[r] == 0) {
-        root_mapping[r] = next_label++;
+      int root = labels_[i];
+      if (label_map[static_cast<size_t>(root)] == 0) {
+        label_map[static_cast<size_t>(root)] = next_label++;
       }
     }
   }
   current_label_ = next_label - 1;
 
-  // 3. Параллельно присваиваем новые нормализованные метки
+  // Phase 3: Parallel label remapping
   tbb::parallel_for(0, total_pixels, [&](int i) {
     if (labels_[i] != 0) {
-      labels_[i] = root_mapping[labels_[i]];
+      labels_[i] = label_map[static_cast<size_t>(labels_[i])];
     }
   });
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::InitLabelsTbb(int /*total_pixels*/) {
-  // Не используется
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::MergeHorizontalPairsTbb() {
-  // Не используется
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::MergeVerticalPairsTbb() {
-  // Не используется
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::FinalizeRootsTbb(int /*total_pixels*/) {
-  // Не используется
-}
-
-void IvanovaPMarkingComponentsOnBinaryImageTBB::NormalizeLabelsTbb(int /*total_pixels*/) {
-  // Не используется
 }
 
 bool IvanovaPMarkingComponentsOnBinaryImageTBB::RunImpl() {

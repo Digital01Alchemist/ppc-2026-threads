@@ -98,7 +98,7 @@ bool IvanovaPMarkingComponentsOnBinaryImageSTL::PreProcessingImpl() {
   int total_pixels = width_ * height_;
   labels_.assign(total_pixels, 0);
 
-  // Инициализация глобального вектора DSU
+  // Initialize global DSU vector for local parents
   int num_threads = ppc::util::GetNumThreads();
   parent_.resize((static_cast<size_t>(num_threads) * static_cast<size_t>(total_pixels)) + 1);
   for (size_t i = 0; i < parent_.size(); ++i) {
@@ -137,9 +137,8 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::UnionLabels(int label1, int labe
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessPixel(int /*xx*/, int /*yy*/, int /*idx*/) {}
-
-int IvanovaPMarkingComponentsOnBinaryImageSTL::FindLocalRootStl(int label, const std::vector<int> &local_parent) {
+// Helper: Find root in local parent array
+int IvanovaPMarkingComponentsOnBinaryImageSTL::FindLocalRoot(int label, const std::vector<int> &local_parent) {
   int root = label;
   while (local_parent[root] != root) {
     root = local_parent[root];
@@ -147,10 +146,11 @@ int IvanovaPMarkingComponentsOnBinaryImageSTL::FindLocalRootStl(int label, const
   return root;
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::UnionLocalLabelsStl(int label1, int label2,
-                                                                    std::vector<int> &local_parent) {
-  int root1 = FindLocalRootStl(label1, local_parent);
-  int root2 = FindLocalRootStl(label2, local_parent);
+// Helper: Union in local parent array
+void IvanovaPMarkingComponentsOnBinaryImageSTL::UnionLocalLabels(int label1, int label2,
+                                                                 std::vector<int> &local_parent) {
+  int root1 = FindLocalRoot(label1, local_parent);
+  int root2 = FindLocalRoot(label2, local_parent);
   if (root1 != root2) {
     if (root1 < root2) {
       local_parent[root2] = root1;
@@ -160,15 +160,15 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::UnionLocalLabelsStl(int label1, 
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessStripePixelStl(int xx, int yy, int idx, int start_row,
-                                                                      std::vector<int> &local_parent,
-                                                                      int &local_label) {
+// Helper: Process single pixel in strip with local DSU
+void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessStripPixel(int xx, int yy, int idx, int strip_start_row,
+                                                                  std::vector<int> &local_parent, int &local_label) {
   if (input_image_.data[idx] == 0) {
     return;
   }
 
   int left_label = (xx > 0) ? labels_[idx - 1] : 0;
-  int top_label = (yy > start_row) ? labels_[idx - width_] : 0;
+  int top_label = (yy > strip_start_row) ? labels_[idx - width_] : 0;
 
   bool left_exists = (left_label != 0);
   bool top_exists = (top_label != 0);
@@ -181,30 +181,32 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessStripePixelStl(int xx, in
     labels_[idx] = label;
 
     if (left_exists && top_exists && left_label != top_label) {
-      UnionLocalLabelsStl(left_label, top_label, local_parent);
+      UnionLocalLabels(left_label, top_label, local_parent);
     }
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::InitializeLocalParentStl(std::vector<int> &local_parent,
-                                                                         int max_labels) {
+// Helper: Initialize local parent array
+void IvanovaPMarkingComponentsOnBinaryImageSTL::InitializeLocalParent(std::vector<int> &local_parent, int max_labels) {
   local_parent.resize(static_cast<size_t>(max_labels));
   for (int i = 0; i < max_labels; ++i) {
     local_parent[static_cast<size_t>(i)] = i;
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessStripeStl(int start_row, int end_row,
-                                                                 std::vector<int> &local_parent, int &local_label) {
+// Helper: Process entire strip
+void IvanovaPMarkingComponentsOnBinaryImageSTL::ProcessStrip(int start_row, int end_row, std::vector<int> &local_parent,
+                                                             int &local_label) {
   for (int yy = start_row; yy < end_row; ++yy) {
     for (int xx = 0; xx < width_; ++xx) {
       int idx = (yy * width_) + xx;
-      ProcessStripePixelStl(xx, yy, idx, start_row, local_parent, local_label);
+      ProcessStripPixel(xx, yy, idx, start_row, local_parent, local_label);
     }
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeBoundariesStl(int num_threads, int rows_per_thread) {
+// Helper: Merge boundaries between strips
+void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeStripBoundaries(int num_threads, int rows_per_thread) {
   for (int thread_id = 0; thread_id < num_threads - 1; ++thread_id) {
     int boundary_row = (thread_id + 1) * rows_per_thread;
     if (boundary_row >= height_) {
@@ -225,9 +227,10 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeBoundariesStl(int num_threa
   }
 }
 
-void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeLocalParentsStl(const std::vector<std::vector<int>> &local_parents,
-                                                                     const std::vector<int> &local_labels,
-                                                                     int num_threads, int total_pixels) {
+// Helper: Merge local parents into global
+void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeLocalParents(const std::vector<std::vector<int>> &local_parents,
+                                                                  const std::vector<int> &local_labels, int num_threads,
+                                                                  int total_pixels) {
   for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
     if (local_parents[static_cast<size_t>(thread_id)].empty()) {
       continue;
@@ -255,7 +258,8 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::FirstPass() {
   std::vector<std::thread> threads;
 
   threads.reserve(static_cast<size_t>(num_threads));
-  // Фаза 1: Параллельная обработка полос через стандартные потоки
+
+  // Phase 1: Parallel strip processing with local DSU
   for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
     threads.emplace_back(
         [this, thread_id, rows_per_thread, &local_parents, &local_labels, num_threads, total_pixels]() {
@@ -266,12 +270,12 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::FirstPass() {
       }
 
       int max_possible_labels = (num_threads * total_pixels) + 1;
-      InitializeLocalParentStl(local_parents[thread_id], max_possible_labels);
+      InitializeLocalParent(local_parents[thread_id], max_possible_labels);
 
       int &local_label = local_labels[static_cast<size_t>(thread_id)];
       local_label = thread_id * total_pixels;
 
-      ProcessStripeStl(start_row, end_row, local_parents[thread_id], local_label);
+      ProcessStrip(start_row, end_row, local_parents[thread_id], local_label);
     });
   }
 
@@ -279,11 +283,11 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::FirstPass() {
     thread.join();
   }
 
-  // Фаза 2: Последовательное объединение смежных границ между полосами
-  MergeBoundariesStl(num_threads, rows_per_thread);
+  // Phase 2: Sequential boundary merging
+  MergeStripBoundaries(num_threads, rows_per_thread);
 
-  // Фаза 3: Перенос локальных отношений эквивалентности в глобальный вектор
-  MergeLocalParentsStl(local_parents, local_labels, num_threads, total_pixels);
+  // Phase 3: Merge local parents into global DSU
+  MergeLocalParents(local_parents, local_labels, num_threads, total_pixels);
 
   current_label_ = 0;
   for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
@@ -295,7 +299,7 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::SecondPass() {
   int num_threads = ppc::util::GetNumThreads();
   int total_pixels = width_ * height_;
 
-  // Убран локальный unordered_map, заменен плоским вектором разметки
+  // Use flat vector for label mapping (matches parent_ size)
   std::vector<int> new_labels((static_cast<size_t>(num_threads) * static_cast<size_t>(total_pixels)) + 1, 0);
   int next_label = 1;
 
@@ -313,12 +317,6 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::SecondPass() {
 
   current_label_ = next_label - 1;
 }
-
-void IvanovaPMarkingComponentsOnBinaryImageSTL::InitLabelsStl(int /*unused*/, int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeHorizontalPairsStl(int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeVerticalPairsStl(int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::FinalizeRootsStl(int /*unused*/, int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::NormalizeLabelsStl(int /*unused*/) {}
 
 bool IvanovaPMarkingComponentsOnBinaryImageSTL::RunImpl() {
   int total_pixels = width_ * height_;
