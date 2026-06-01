@@ -29,6 +29,7 @@ class IvanovaPMarkingComponentsOnBinaryImageSTL : public BaseTask {
 
   int FindRoot(int label);
   void UnionLabels(int label1, int label2);
+  void ProcessPixel(int xx, int yy, int idx);
   void FirstPass();
   void SecondPass();
 
