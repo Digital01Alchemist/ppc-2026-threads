@@ -283,8 +283,8 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::FirstPass() {
     thread.join();
   }
 
-  // Фаза 2: Последовательное объединение смежных границ между полосами
-  MergeBoundariesStl(num_threads, rows_per_thread);
+  // Phase 2: Sequential boundary merging
+  MergeStripBoundaries(num_threads, rows_per_thread);
 
   // Phase 3: Merge local parents into global DSU
   MergeLocalParents(local_parents, local_labels, num_threads, total_pixels);
@@ -317,12 +317,6 @@ void IvanovaPMarkingComponentsOnBinaryImageSTL::SecondPass() {
 
   current_label_ = next_label - 1;
 }
-
-void IvanovaPMarkingComponentsOnBinaryImageSTL::InitLabelsStl(int /*unused*/, int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeHorizontalPairsStl(int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::MergeVerticalPairsStl(int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::FinalizeRootsStl(int /*unused*/, int /*unused*/) {}
-void IvanovaPMarkingComponentsOnBinaryImageSTL::NormalizeLabelsStl(int /*unused*/) {}
 
 bool IvanovaPMarkingComponentsOnBinaryImageSTL::RunImpl() {
   int total_pixels = width_ * height_;
